@@ -164,15 +164,13 @@ int main()
 
     if (!hGetProcIDDLL) {
         std::cout << "could not load the dynamic library" << std::endl;
-        return EXIT_FAILURE;
-    }
+        return EXIT_FAILURE;}
 
     // resolve function address here
     __D3D11CreateDevice = (dynload_D3D11CreateDevice)GetProcAddress(hGetProcIDDLL, "D3D11CreateDevice");
     if (!__D3D11CreateDevice) {
         std::cout << "could not locate the function" << std::endl;
-        return EXIT_FAILURE;
-    }
+        return EXIT_FAILURE;}
 
 
     // get dll base address
@@ -180,10 +178,22 @@ int main()
     if (!GetModuleInformation(GetCurrentProcess(), hGetProcIDDLL, &mod_info, sizeof(MODULEINFO))) {
         std::cout << "could not get module information" << std::endl;
         auto v = GetLastError();
-        return EXIT_FAILURE;
-    }
+        return EXIT_FAILURE;}
 
-    std::cout << "base address: " << mod_info.lpBaseOfDll << std::endl;
+
+    // get other dll base address
+    HMODULE dxgi_module = GetModuleHandleA("dxgi.dll");
+    if (!dxgi_module) {
+        std::cout << "could not get dxgi module handle" << std::endl;
+        return EXIT_FAILURE;}
+
+    MODULEINFO other_mod_info = {};
+    if (!GetModuleInformation(GetCurrentProcess(), dxgi_module, &other_mod_info, sizeof(MODULEINFO))) {
+        std::cout << "could not get module information" << std::endl;
+        return EXIT_FAILURE;}
+
+    std::cout << "d3d11 base address: " << mod_info.lpBaseOfDll << std::endl;
+    std::cout << "dxgi base address: " << other_mod_info.lpBaseOfDll << std::endl;
 
 
     ID3D11Device1* d3d11Device;
@@ -203,19 +213,23 @@ int main()
     std::cout << "DrawIndexed: "            << "d3d11.dll+" << (draw_indexed_ptr - (UINT64)mod_info.lpBaseOfDll) << " (" << draw_indexed_ptr << ")" << std::endl;
     std::cout << "VSSetShader: "            << "d3d11.dll+" << (set_shader_ptr   - (UINT64)mod_info.lpBaseOfDll) << " (" << set_shader_ptr   << ")" << std::endl;
     std::cout << "VSSetConstantBuffers: "   << "d3d11.dll+" << (set_consts_ptr   - (UINT64)mod_info.lpBaseOfDll) << " (" << set_consts_ptr   << ")" << std::endl;
-    std::cout << "Present: "                << "d3d11.dll+" << (present_ptr      - (UINT64)mod_info.lpBaseOfDll) << " (" << present_ptr      << ")" << std::endl;
+    std::cout << "Present: "                << "dxgi.dll+"  << (present_ptr      - (UINT64)other_mod_info.lpBaseOfDll) << " (" << present_ptr      << ")" << std::endl;
 
+
+    //UINT64 debugvar = 0x1020304050607080;
+    //debugvar += draw_indexed_ptr;
+    //std::cout << debugvar;
 
     std::string test;
     std::cin >> test;
 
     // turns out C++ doesn't let you get the pointer to virtual functions??? thanks bill gates
     // so we just have to do this the hard way
-    //__debugbreak();
-    //d3d11DeviceContext->DrawIndexed(0, 0, 0);                 // +60h vtable[12]
-    //d3d11DeviceContext->VSSetShader(nullptr, nullptr, 0);     // +58h vtable[11]
-    //d3d11DeviceContext->VSSetConstantBuffers(0, 1, nullptr);  // +38h vtable[7]
-    //d3d11SwapChain->Present(1, 0);                            // +40h vtable[8]
+    __debugbreak();
+    d3d11DeviceContext->DrawIndexed(0, 0, 0);                 // +60h vtable[12]
+    d3d11DeviceContext->VSSetShader(nullptr, nullptr, 0);     // +58h vtable[11]
+    d3d11DeviceContext->VSSetConstantBuffers(0, 1, nullptr);  // +38h vtable[7]
+    d3d11SwapChain->Present(1, 0);                            // +40h vtable[8]
     return 0;
 }
 
