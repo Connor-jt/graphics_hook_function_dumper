@@ -5,6 +5,7 @@
 #include <fstream>
 
 #include <windows.h>
+#include <psapi.h>
 #include <d3d11_1.h>
 #pragma comment(lib, "d3d11.lib")
 #include <d3dcompiler.h>
@@ -23,6 +24,18 @@ unsigned long long calculateChecksum(const std::string& filename) {
     return checksum;
 }
 
+typedef HRESULT(__stdcall* dynload_D3D11CreateDevice)(
+    _In_opt_ IDXGIAdapter* pAdapter,
+    D3D_DRIVER_TYPE DriverType,
+    HMODULE Software,
+    UINT Flags,
+    _In_reads_opt_(FeatureLevels) CONST D3D_FEATURE_LEVEL* pFeatureLevels,
+    UINT FeatureLevels,
+    UINT SDKVersion,
+    _COM_Outptr_opt_ ID3D11Device** ppDevice,
+    _Out_opt_ D3D_FEATURE_LEVEL* pFeatureLevel,
+    _COM_Outptr_opt_ ID3D11DeviceContext** ppImmediateContext);
+dynload_D3D11CreateDevice __D3D11CreateDevice;
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam){
     switch (msg){
@@ -52,10 +65,7 @@ void generate_dx11_junk(ID3D11Device1*& d3d11Device, ID3D11DeviceContext1*& d3d1
         winClass.lpszClassName = L"MyWindowClass";
         winClass.hIconSm = LoadIconW(0, IDI_APPLICATION);
 
-        if (!RegisterClassExW(&winClass)) {
-            MessageBoxA(0, "RegisterClassEx failed", "Fatal Error", MB_OK);
-            return; // GetLastError();
-        }
+        if (!RegisterClassExW(&winClass)) return;
 
         RECT initialRect = { 0, 0, 1024, 768 };
         AdjustWindowRectEx(&initialRect, WS_OVERLAPPEDWINDOW, FALSE, WS_EX_OVERLAPPEDWINDOW);
@@ -64,17 +74,14 @@ void generate_dx11_junk(ID3D11Device1*& d3d11Device, ID3D11DeviceContext1*& d3d1
 
         hwnd = CreateWindowExW(WS_EX_OVERLAPPEDWINDOW,
             winClass.lpszClassName,
-            L"08. Drawing a Cube",
+            L"sample",
             WS_OVERLAPPEDWINDOW | WS_VISIBLE,
             CW_USEDEFAULT, CW_USEDEFAULT,
             initialWidth,
             initialHeight,
             0, 0, winClass.hInstance, 0);
 
-        if (!hwnd) {
-            MessageBoxA(0, "CreateWindowEx failed", "Fatal Error", MB_OK);
-            return; // GetLastError();
-        }
+        if (!hwnd) return;
     }
 
     // Create D3D11 Device and Context
@@ -84,15 +91,13 @@ void generate_dx11_junk(ID3D11Device1*& d3d11Device, ID3D11DeviceContext1*& d3d1
         D3D_FEATURE_LEVEL featureLevels[] = { D3D_FEATURE_LEVEL_11_0 };
         UINT creationFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
 
-        HRESULT hResult = D3D11CreateDevice(0, D3D_DRIVER_TYPE_HARDWARE,
+        HRESULT hResult = __D3D11CreateDevice(0, D3D_DRIVER_TYPE_HARDWARE,
             0, creationFlags,
             featureLevels, ARRAYSIZE(featureLevels),
             D3D11_SDK_VERSION, &baseDevice,
             0, &baseDeviceContext);
-        if (FAILED(hResult)) {
-            MessageBoxA(0, "D3D11CreateDevice() failed", "Fatal Error", MB_OK);
-            return; // GetLastError();
-        }
+        if (FAILED(hResult)) return; 
+        
 
         // Get 1.1 interface of D3D11 Device and Context
         hResult = baseDevice->QueryInterface(__uuidof(ID3D11Device1), (void**)&d3d11Device);
@@ -111,21 +116,15 @@ void generate_dx11_junk(ID3D11Device1*& d3d11Device, ID3D11DeviceContext1*& d3d1
         {
             IDXGIDevice1* dxgiDevice;
             HRESULT hResult = d3d11Device->QueryInterface(__uuidof(IDXGIDevice1), (void**)&dxgiDevice);
-            //assert(SUCCEEDED(hResult));
 
             IDXGIAdapter* dxgiAdapter;
             hResult = dxgiDevice->GetAdapter(&dxgiAdapter);
-            //assert(SUCCEEDED(hResult));
             dxgiDevice->Release();
 
             DXGI_ADAPTER_DESC adapterDesc;
             dxgiAdapter->GetDesc(&adapterDesc);
 
-            OutputDebugStringA("Graphics Device: ");
-            OutputDebugStringW(adapterDesc.Description);
-
             hResult = dxgiAdapter->GetParent(__uuidof(IDXGIFactory2), (void**)&dxgiFactory);
-            //assert(SUCCEEDED(hResult));
             dxgiAdapter->Release();
         }
 
@@ -143,7 +142,6 @@ void generate_dx11_junk(ID3D11Device1*& d3d11Device, ID3D11DeviceContext1*& d3d1
         d3d11SwapChainDesc.Flags = 0;
 
         HRESULT hResult = dxgiFactory->CreateSwapChainForHwnd(d3d11Device, hwnd, &d3d11SwapChainDesc, 0, 0, &d3d11SwapChain);
-        //assert(SUCCEEDED(hResult));
 
         dxgiFactory->Release();
     }
@@ -162,29 +160,63 @@ int main()
     unsigned long long checksum = calculateChecksum(target_dll);
     std::cout << "Checksum: " << checksum << std::endl;
     
+    HMODULE hGetProcIDDLL = LoadLibraryA(target_dll.c_str());
+
+    if (!hGetProcIDDLL) {
+        std::cout << "could not load the dynamic library" << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    // resolve function address here
+    __D3D11CreateDevice = (dynload_D3D11CreateDevice)GetProcAddress(hGetProcIDDLL, "D3D11CreateDevice");
+    if (!__D3D11CreateDevice) {
+        std::cout << "could not locate the function" << std::endl;
+        return EXIT_FAILURE;
+    }
+
+
+    // get dll base address
+    MODULEINFO mod_info = {}; 
+    if (!GetModuleInformation(GetCurrentProcess(), hGetProcIDDLL, &mod_info, sizeof(MODULEINFO))) {
+        std::cout << "could not get module information" << std::endl;
+        auto v = GetLastError();
+        return EXIT_FAILURE;
+    }
+
+    std::cout << "base address: " << mod_info.lpBaseOfDll << std::endl;
+
 
     ID3D11Device1* d3d11Device;
     ID3D11DeviceContext1* d3d11DeviceContext;
     IDXGISwapChain1* d3d11SwapChain;
     generate_dx11_junk(d3d11Device, d3d11DeviceContext, d3d11SwapChain);
 
-    // turns out C++ doesn't let you get the pointer to virtual functions??? thanks bill gates
-    // so we just have to do this the hard way
-    //__asm {int 3; }
-    //asm("int3");
+    
+
+
+    // device_ptr->vtable_ptr->function_ptr
+    UINT64 draw_indexed_ptr = (UINT64)*((*(void***)d3d11DeviceContext) + 12);
+    UINT64 set_shader_ptr   = (UINT64)*((*(void***)d3d11DeviceContext) + 11);
+    UINT64 set_consts_ptr   = (UINT64)*((*(void***)d3d11DeviceContext) + 7 );
+    UINT64 present_ptr      = (UINT64)*((*(void***)d3d11SwapChain    ) + 8 );
+    std::cout << std::hex;
+    std::cout << "DrawIndexed: "            << "d3d11.dll+" << (draw_indexed_ptr - (UINT64)mod_info.lpBaseOfDll) << " (" << draw_indexed_ptr << ")" << std::endl;
+    std::cout << "VSSetShader: "            << "d3d11.dll+" << (set_shader_ptr   - (UINT64)mod_info.lpBaseOfDll) << " (" << set_shader_ptr   << ")" << std::endl;
+    std::cout << "VSSetConstantBuffers: "   << "d3d11.dll+" << (set_consts_ptr   - (UINT64)mod_info.lpBaseOfDll) << " (" << set_consts_ptr   << ")" << std::endl;
+    std::cout << "Present: "                << "d3d11.dll+" << (present_ptr      - (UINT64)mod_info.lpBaseOfDll) << " (" << present_ptr      << ")" << std::endl;
+
 
     std::string test;
     std::cin >> test;
 
-    __debugbreak();
-    d3d11DeviceContext->DrawIndexed(0, 0, 0);
-    __debugbreak();
-    d3d11DeviceContext->VSSetShader(nullptr, nullptr, 0);
-    __debugbreak();
-    d3d11DeviceContext->VSSetConstantBuffers(0, 1, nullptr);
-    __debugbreak();
-    d3d11SwapChain->Present(1, 0);
-
+    // turns out C++ doesn't let you get the pointer to virtual functions??? thanks bill gates
+    // so we just have to do this the hard way
+    //__debugbreak();
+    //d3d11DeviceContext->DrawIndexed(0, 0, 0);                 // +60h vtable[12]
+    //d3d11DeviceContext->VSSetShader(nullptr, nullptr, 0);     // +58h vtable[11]
+    //d3d11DeviceContext->VSSetConstantBuffers(0, 1, nullptr);  // +38h vtable[7]
+    //d3d11SwapChain->Present(1, 0);                            // +40h vtable[8]
+    return 0;
 }
 
 // Run program: Ctrl + F5 or Debug > Start Without Debugging menu
