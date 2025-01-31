@@ -15,12 +15,12 @@
 unsigned long long calculateChecksum(const std::string& filename) {
     std::ifstream file(filename, std::ios::binary);
     if (!file.is_open()) {
-        std::cerr << "Unable to open file: " << filename << std::endl;
+        std::cerr << "Unable to open file for checksum'ing: " << filename << std::endl;
         return 0;}
-    unsigned long long checksum = 0;
-    char ch;
-    while (file.get(ch))
-        checksum += static_cast<unsigned char>(ch);
+    UINT64 checksum = 0;
+    UINT64 buffer;
+    while (file.read((char*)(&buffer), 8))
+        checksum ^= buffer;
     return checksum;
 }
 
@@ -151,14 +151,12 @@ void generate_dx11_junk(ID3D11Device1*& d3d11Device, ID3D11DeviceContext1*& d3d1
 
 int main()
 {
-    std::cout << "Hello World!\n";
+    std::cout << "Hello World!\n\n";
 
     // iterate all running windows processes
 
     // check loaded modules for either DirectX, vulkan, or whatever
     std::string target_dll = "C:\\Windows\\System32\\d3d11.dll";
-    unsigned long long checksum = calculateChecksum(target_dll);
-    std::cout << "Checksum: " << checksum << std::endl;
     
     HMODULE hGetProcIDDLL = LoadLibraryA(target_dll.c_str());
 
@@ -192,9 +190,19 @@ int main()
         std::cout << "could not get module information" << std::endl;
         return EXIT_FAILURE;}
 
-    std::cout << "d3d11 base address: " << mod_info.lpBaseOfDll << std::endl;
-    std::cout << "dxgi base address: " << other_mod_info.lpBaseOfDll << std::endl;
+    std::cout << std::hex;
 
+    std::cout << "d3d11 base address: " << mod_info.lpBaseOfDll << std::endl;
+    std::cout << "dxgi base address: " << other_mod_info.lpBaseOfDll << std::endl << std::endl;
+
+
+    std::cout << "d3d11.dll Checksum: " << calculateChecksum(target_dll) << std::endl;
+
+    char filename[256];
+    if (!GetModuleFileNameA(dxgi_module, filename, 256)) {
+        std::cout << "could not get dxgi module filepath" << std::endl;
+        return EXIT_FAILURE;}
+    std::cout << "dxgi.dll Checksum: " << calculateChecksum(filename) << std::endl << std::endl;
 
     ID3D11Device1* d3d11Device;
     ID3D11DeviceContext1* d3d11DeviceContext;
@@ -209,7 +217,6 @@ int main()
     UINT64 set_shader_ptr   = (UINT64)*((*(void***)d3d11DeviceContext) + 11);
     UINT64 set_consts_ptr   = (UINT64)*((*(void***)d3d11DeviceContext) + 7 );
     UINT64 present_ptr      = (UINT64)*((*(void***)d3d11SwapChain    ) + 8 );
-    std::cout << std::hex;
     std::cout << "DrawIndexed: "            << "d3d11.dll+" << (draw_indexed_ptr - (UINT64)mod_info.lpBaseOfDll) << " (" << draw_indexed_ptr << ")" << std::endl;
     std::cout << "VSSetShader: "            << "d3d11.dll+" << (set_shader_ptr   - (UINT64)mod_info.lpBaseOfDll) << " (" << set_shader_ptr   << ")" << std::endl;
     std::cout << "VSSetConstantBuffers: "   << "d3d11.dll+" << (set_consts_ptr   - (UINT64)mod_info.lpBaseOfDll) << " (" << set_consts_ptr   << ")" << std::endl;
